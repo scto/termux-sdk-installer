@@ -1,12 +1,17 @@
 #!/bin/bash
 #
-### Termux SDK Installer
+### CodeLikeBastiMove - Ultimate Termux SDK & Environment Installer
+# Basierend auf dem AndroidIDE Installer, erweitert für Native Dev & AI
 #
 
 # Vars
 install_dir="${HOME}"
 manifest_url="https://raw.githubusercontent.com/AndroidIDEOfficial/androidide-tools/main/manifest.json"
 manifest="${PWD}/manifest.json"
+# Offizielles Google NDK für Aarch64 (r26b ist stabil)
+ndk_url="https://dl.google.com/android/repository/android-ndk-r26b-linux-aarch64.zip"
+ndk_ver_name="android-ndk-r26b"
+
 # DO NOT CHANGE THESE!
 CURRENT_SHELL="${SHELL##*/}"
 CURRENT_DIR="${PWD}"
@@ -15,6 +20,7 @@ arch="$(dpkg --print-architecture)"
 # Color Codes
 red="\e[0;31m"          # Red
 green="\e[0;32m"        # Green
+yellow="\e[0;33m"       # Yellow
 cyan="\e[0;36m"         # Cyan
 white="\e[0;37m"        # White
 nocol="\033[0m"         # Default
@@ -22,176 +28,207 @@ nocol="\033[0m"         # Default
 # Functions
 banner() {
   echo -e "
-${green}------------------------------------------------
-
-Termux Android SDK Installer${nocol}:
-https://github.com/Sohil876/termux-sdk-installer
-
-${green}------------------------------------------------${nocol}
+${cyan}------------------------------------------------
+CodeLikeBastiMove Dev Environment Setup
+${white}Android SDK + NDK + AI (Gemini) + Native Tools
+${cyan}------------------------------------------------${nocol}
 "
 }
 
 download_and_extract() {
-  # Name shown in echo
   name="${1}"
-  # URL to download from
   url="${2}"
-  # Directory in which the downloaded archive will be extracted
   dir="${3}"
-  # Destination path for downloading the file
   dest="${4}"
+
+  # Verzeichnis erstellen falls nicht vorhanden
+  mkdir -p "${dir}"
 
   cd ${dir}
   do_download=true
   if [[ -f ${dest} ]]; then
     name=$(basename ${dest})
-    echo -e "${green}File ${name} already exists.${nocol}"
-    echo "Do you want to skip the download process? ([${green}y${nocol}]es/[${red}N${nocol}]o): "
+    echo -e "${yellow}File ${name} already exists.${nocol}"
+    echo "Skip download? ([y]es/[N]o): "
     read skip
-    if [[ "${skip}" = "y" || "${skip}" = "yes" || "${skip}" = "Y" || "${skip}" = "Yes" ]]; then
+    if [[ "${skip}" =~ ^[Yy]$ ]]; then
       do_download=false
     fi
-    echo ""
   fi
 
   if [[ "${do_download}" = "true" ]]; then
     echo -e "${green}Downloading ${name}...${nocol}"
     curl -L -o ${dest} ${url}
-    echo -e "${green}${name} has been downloaded.${nocol}"
-    echo ""
+    echo -e "${green}${name} downloaded.${nocol}"
   fi
 
   if [[ ! -f ${dest} ]]; then
-    echo -e "${red}The downloaded file ${name} does not exist! Aborting...${nocol}"
+    echo -e "${red}File ${name} missing! Aborting...${nocol}"
     exit 1
   fi
-  # Extract the downloaded archive
-  echo -e "${green}Extracting downloaded archive...${nocol}"
-  tar xvJf ${dest}
-  echo -e "${green}Extracted successfully${nocol}"
-  echo ""
-  # Delete the downloaded file
+
+  echo -e "${green}Extracting ${name}...${nocol}"
+  if [[ "${dest}" == *.zip ]]; then
+      unzip -q ${dest}
+  else
+      tar xJf ${dest}
+  fi
+  echo -e "${green}Extraction complete.${nocol}"
+  
+  # Cleanup zip/tar
   rm -vf ${dest}
-  # cd into the previous working directory
   cd ${CURRENT_DIR}
 }
 
 gen_data() {
   if ! command -v curl &> /dev/null; then
-    echo -e "${red}curl is not installed!${nocol}"
-    echo "Install it with pkg install curl"
-    echo ""
+    echo -e "${red}curl missing! Install with pkg install curl${nocol}"
     exit 1
   fi
   curl --silent -L -o ${manifest} ${manifest_url}
+  
+  # Check manifest
   if ! [[ -s ${manifest} ]]; then
-    echo -e "${red}Problem fetching manifest!${nocol}"
-    echo "Try again after some seconds"
-    echo ""
-    if [[ -f ${manifest} ]] then
-      rm ${manifest}
-    fi
-    exit 1
+     echo -e "${red}Manifest download failed!${nocol}"
+     rm -f ${manifest}
+     exit 1
   fi
+
   sdk_url=$(cat ${manifest} | jq -r .android_sdk)
   sdk_file=${sdk_url##*/}
+  
+  # Logic to find correct build tools version from manifest
   sdk_m_version=($(cat ${manifest} | jq .build_tools.${arch} | jq -r 'keys_unsorted[]'))
   sdk_m_version=${sdk_m_version[0]}
   sdk_version=${sdk_m_version:1}
   sdk_version="${sdk_version//_/.}"
+  
   build_tools_url=($(cat ${manifest} | jq .build_tools.${arch} | jq -r .${sdk_m_version}))
   build_tools_file=${build_tools_url##*/}
+  
   cmdline_tools_url=$(cat ${manifest} | jq -r .cmdline_tools)
   cmdline_tools_file=${cmdline_tools_url##*/}
+  
   platform_tools_url=($(cat ${manifest} | jq .platform_tools.${arch} | jq -r .${sdk_m_version}))
   platform_tools_file=${platform_tools_url##*/}
+  
   rm ${manifest}
 }
 
-help() {
-  cat <<-_EOL_
-$(echo -e "${green}Usage:${nocol}")
--h,  --help             Shows brief help
---info                  Show info about sdk, arch, etc
--i, --install           Start installation, installs jdk and android sdk with cmdline and build tools
-_EOL_
+install_system_tools() {
+  echo -e "${green}Installing System & Native Dev Tools...${nocol}"
+  pkg update -y
+  # Core Tools: JDK, Git, Build-Tools, Python, Rust, Editoren
+  pkg install -y \
+    openjdk-17 \
+    curl wget jq tar unzip zip \
+    git gh \
+    cmake ninja make clang binutils pkg-config \
+    python rust \
+    neovim ripgrep lazygit fd \
+    libopenblas libjpeg-turbo libcrypt libffi openssl \
+    gradle
 }
 
-info() {
-  gen_data
-  echo -e "${green}Active Shell:${nocol} ${CURRENT_SHELL}"
-  echo -e "${green}Arch:${nocol} ${arch}"
-  echo -e "${green}JDK:${nocol} OpenJDK 17"
-  echo -e "${green}SDK/Tools version:${nocol} v${sdk_version}"
-  echo -e "${green}SDK url:${nocol} ${sdk_url}"
-  echo -e "${green}Build tools url:${nocol} ${build_tools_url}"
-  echo -e "${green}Commandline tools url:${nocol} ${cmdline_tools_url}"
-  echo -e "${green}Platform tools url:${nocol} ${platform_tools_url}"
-  echo -e "${green}SDK from:${nocol} https://github.com/AndroidIDEOfficial/androidide-tools"
+install_ai_tools() {
+  echo -e "${green}Installing AI Tools (Aider)...${nocol}"
+  
+  # Fix für Rust/Python Builds auf Termux
+  export ANDROID_API_LEVEL=24
+  export CARGO_BUILD_TARGET=aarch64-linux-android
+  export CFLAGS="-Wno-incompatible-function-pointer-types"
+
+  echo "Upgrading pip & build tools..."
+  pip install -U pip setuptools wheel maturin
+
+  echo "Installing aider-chat (this may take time compiling numpy)..."
+  pip install aider-chat
 }
 
 install() {
   echo ""
   gen_data
-  echo -e "${green}Installing dependencies...${nocol}"
-  pkg update
-  pkg install curl wget termux-tools jq tar -y
-  echo -e "${red}!${nocol}${green}This will download ~400MB size files and will take ~600MB space on disk.${nocol}"
-  echo -e "Continue? ([${green}y${nocol}]es/[${red}N${nocol}]o): "
+  
+  echo -e "${green}Starting Setup...${nocol}"
+  install_system_tools
+
+  echo -e "${red}!${nocol}${green}Downloading SDK & NDK components (~1.5 GB). Ensure enough WiFi/Storage.${nocol}"
+  echo -e "Continue? ([y]es/[N]o): "
   read proceed
-  if ! ([[ "${proceed}" = "y" || "${proceed}" = "yes" || "${proceed}" = "Y" || "${proceed}" = "Yes" ]]); then
+  if ! [[ "${proceed}" =~ ^[Yy]$ ]]; then
     echo -e "${red}Aborted!${nocol}"
     exit 1
   fi
-  echo -e "${green}Installing jdk...${nocol}"
-  pkg install openjdk-17 -y
-  echo -e "${green}Downloading sdk files...${nocol}"
-  # Download and extract the android SDK
-  download_and_extract "Android SDK" ${sdk_url} ${install_dir} "${install_dir}/${sdk_file}"
-  # Download and extract build tools
-  download_and_extract "Build tools" ${build_tools_url} "${install_dir}/android-sdk" "${install_dir}/${build_tools_file}"
-  # Download and extract cmdline tools
-  download_and_extract "Command line tools" ${cmdline_tools_url} "${install_dir}/android-sdk" "${install_dir}/${cmdline_tools_file}"
-  # Download and extract platform tools
-  download_and_extract "Platform tools" ${platform_tools_url} "${install_dir}/android-sdk" "${install_dir}/${platform_tools_file}"
-  # Setting env vars
-  echo -e "${green}Setting up env vars...${nocol}"
+
+  # 1. Android SDK Components
+  # -------------------------
+  download_and_extract "Android SDK Base" ${sdk_url} ${install_dir} "${install_dir}/${sdk_file}"
+  download_and_extract "Build Tools (Patched)" ${build_tools_url} "${install_dir}/android-sdk" "${install_dir}/${build_tools_file}"
+  download_and_extract "Cmdline Tools" ${cmdline_tools_url} "${install_dir}/android-sdk" "${install_dir}/${cmdline_tools_file}"
+  download_and_extract "Platform Tools" ${platform_tools_url} "${install_dir}/android-sdk" "${install_dir}/${platform_tools_file}"
+
+  # 2. Android NDK
+  # --------------
+  echo -e "${green}Setting up NDK...${nocol}"
+  # Wir installieren das NDK direkt in das sdk Verzeichnis unter /ndk
+  mkdir -p "${install_dir}/android-sdk/ndk"
+  download_and_extract "Android NDK (r26b)" ${ndk_url} "${install_dir}/android-sdk/ndk" "${install_dir}/android-sdk/ndk/ndk-bundle.zip"
+  
+  # Umbenennen des entpackten Ordners für einfachere Pfade
+  if [[ -d "${install_dir}/android-sdk/ndk/${ndk_ver_name}" ]]; then
+      echo "Linking NDK version..."
+      # Optional: Symlink 'latest' erstellen
+      ln -sfn "${install_dir}/android-sdk/ndk/${ndk_ver_name}" "${install_dir}/android-sdk/ndk/latest"
+  fi
+
+  # 3. AI Setup
+  # -----------
+  install_ai_tools
+
+  # 4. Exports & Config
+  # -------------------
+  echo -e "${green}Configuring Environment Variables...${nocol}"
+  
   if [[ "${CURRENT_SHELL}" == "bash" ]]; then
     shell_profile="${HOME}/.bashrc"
   elif [[ "${CURRENT_SHELL}" == "zsh" ]]; then
     shell_profile="${HOME}/.zshrc"
   else
-    unsupported_shell_used=true
-    echo -e "${red}Unsupported shell!${nocol}"
-    echo -e "${green}You will need to manually export env vars JAVA_HOME, ANDROID_SDK_ROOT and ANDROID_HOME on every session to use sdk, or add them to your shell profile manually:${nocol}"
-    echo 'export JAVA_HOME=${PREFIX}/opt/openjdk-17'
-    echo 'export ANDROID_SDK_ROOT=${HOME}/android-sdk'
-    echo 'export ANDROID_HOME=${HOME}/android-sdk'
-    echo -e "${green}Also do the same for sdk and jdk bin locations:${nocol}"
-    echo 'export PATH=${PREFIX}/opt/openjdk/bin:${HOME}/android-sdk/cmdline-tools/latest/bin:${PATH}'
+    shell_profile="${HOME}/.bashrc" # Fallback
   fi
-  if [[ -z "${unsupported_shell_used}" ]]; then
-    if [[ -z "${JAVA_HOME}" ]]; then
-      echo -e '\nexport JAVA_HOME=${PREFIX}/opt/openjdk\n' >> ${shell_profile}
-      echo -e '\nexport PATH=${PREFIX}/opt/openjdk/bin:${PATH}\n' >> ${shell_profile}
-    else
-      echo "JAVA_HOME is already set to: ${JAVA_HOME}"
-      echo "Check if the path is correct, it should be: ${PREFIX}/opt/openjdk"
-    fi
-    if [[ -z "${ANDROID_SDK_ROOT}" ]]; then
-      echo -e '\nexport ANDROID_SDK_ROOT=${HOME}/android-sdk\n' >> ${shell_profile}
-    else
-      echo "ANDROID_SDK_ROOT is already set to: ${ANDROID_SDK_ROOT}"
-      echo "Check if the path is correct, it should be: ${install_dir}/android-sdk"
-    fi
-    if [[ -z "${ANDROID_HOME}" ]]; then
-      echo -e '\nexport ANDROID_HOME=${HOME}/android-sdk\n' >> ${shell_profile}
-    else
-      echo "ANDROID_HOME is already set to: ${ANDROID_HOME}"
-      echo "Check if the path is correct, it should be: ${install_dir}/android-sdk"
-    fi
-    echo -e '\nexport PATH=${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}\n' >> ${shell_profile}
-  fi
+
+  # Ask for Gemini Key
+  echo -e "${yellow}Enter your Gemini API Key for the AI Agent (Leave empty to skip):${nocol}"
+  read -r api_key
+
+  # Backup .bashrc
+  cp ${shell_profile} "${shell_profile}.bak" 2>/dev/null
+
+  # Clean old CodeLikeBastiMove entries to avoid duplicates
+  sed -i '/# --- CodeLikeBastiMove Config ---/,/# --- End Config ---/d' ${shell_profile}
+
+  # Write new config
+  cat <<EOT >> ${shell_profile}
+
+# --- CodeLikeBastiMove Config ---
+export JAVA_HOME=\${PREFIX}/opt/openjdk
+export ANDROID_HOME=\${HOME}/android-sdk
+export ANDROID_SDK_ROOT=\${HOME}/android-sdk
+export NDK_HOME=\${ANDROID_HOME}/ndk/${ndk_ver_name}
+export ANDROID_NDK_ROOT=\${NDK_HOME}
+
+# Path Updates
+export PATH=\${JAVA_HOME}/bin:\${PATH}
+export PATH=\${ANDROID_HOME}/cmdline-tools/latest/bin:\${ANDROID_HOME}/platform-tools:\${PATH}
+export PATH=\${NDK_HOME}:\${PATH}
+
+# AI & Compiler Flags
+export ANDROID_API_LEVEL=24
+export GEMINI_API_KEY="${api_key}"
+export AIDER_MODEL="gemini/gemini-1.5-pro-latest"
+# --- End Config ---
+EOT
+
   apt clean
 }
 
@@ -199,39 +236,33 @@ install() {
 case ${@} in
   -h|--help)
     banner
-    echo -e "${green}Note:-${nocol}"
-    echo "This will NOT install ndk."
-    echo ""
-    help
-    echo ""
+    echo -e "${green}Usage:${nocol}"
+    echo "  ./installer.sh -i   -> Full Install (SDK, NDK, AI, Tools)"
+    echo "  ./installer.sh --info -> Show Versions"
     exit 0
   ;;
   --info)
     banner
     info
-    echo ""
     exit 0
   ;;
   -i|--install)
     banner
     if [[ ! -d ${install_dir} ]]; then
-      echo -e "${red}Your install directory doesn't exists!${nocol}"
-      echo "If you didnt change in script then that means your home directory doesn't exist, in that case there's something wrong with your termux installation, please reinstall termux!"
-      echo "Else if you've changed install directory var to something else make sure it exists!"
+      echo -e "${red}Install dir missing! Check Termux setup.${nocol}"
       exit 1
     fi
     install
-    echo -e "${green}Installed Android SDK and OpenJDK sucessfully!${nocol}"
-    echo -e "${green}Please restart termux${nocol}${red}!${nocol}"
-    echo ""
+    echo -e "${green}=========================================${nocol}"
+    echo -e "${green}      Installation Complete!             ${nocol}"
+    echo -e "${green}=========================================${nocol}"
+    echo -e "Please restart Termux or run: source ${shell_profile}"
+    echo -e "Start AI coding with: aider"
     exit 0
   ;;
+  *)
+    banner
+    echo -e "Use -i to install."
+    exit 1
+  ;;
 esac
-
-# Error msg for no arguments specified
-banner
-echo -e "${red}No arguments specified!${nocol}"
-echo "See -h or --help for usage"
-echo ""
-exit 1
-
